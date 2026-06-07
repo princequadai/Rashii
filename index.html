@@ -689,9 +689,95 @@
         transition-duration: 0.01ms !important;
       }
     }
+
+    /* ========== ENTRY OVERLAY ========== */
+    .entry-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: linear-gradient(135deg, #2d1b36, #1a0a2e, #2b1230);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: opacity 0.8s ease, visibility 0.8s ease;
+    }
+
+    .entry-overlay.hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .entry-overlay__emoji {
+      font-size: 64px;
+      margin-bottom: 24px;
+      animation: cakeBounce 3s ease-in-out infinite;
+      filter: drop-shadow(0 0 24px rgba(255, 202, 40, 0.5));
+    }
+
+    .entry-overlay__text {
+      font-family: 'Dancing Script', cursive;
+      font-size: clamp(1.6rem, 5vw, 2.4rem);
+      color: var(--gold-300);
+      margin-bottom: 12px;
+      text-align: center;
+      padding: 0 24px;
+    }
+
+    .entry-overlay__tap {
+      font-family: 'Inter', sans-serif;
+      font-size: 0.85rem;
+      font-weight: 300;
+      color: var(--white-alpha-60);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.5; }
+      50% { opacity: 1; }
+    }
+
+    .entry-overlay__ring {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      border: 2px solid var(--white-alpha-20);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 32px;
+      position: relative;
+    }
+
+    .entry-overlay__ring::after {
+      content: '';
+      position: absolute;
+      inset: -6px;
+      border-radius: 50%;
+      border: 1px solid transparent;
+      border-top-color: var(--pink-400);
+      animation: spin 3s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
   </style>
 </head>
 <body>
+
+  <!-- Entry Overlay -->
+  <div class="entry-overlay" id="entryOverlay">
+    <div class="entry-overlay__ring">
+      <span class="entry-overlay__emoji">🎂</span>
+    </div>
+    <p class="entry-overlay__text">Rashii's Birthday Wish</p>
+    <span class="entry-overlay__tap">✨ Tap to open ✨</span>
+  </div>
 
   <!-- Animated Background -->
   <div class="bg-animated"></div>
@@ -717,7 +803,7 @@
 
   <!-- Hidden YouTube Player (direct iframe for file:// compatibility) -->
   <iframe id="ytPlayer"
-    src="https://www.youtube.com/embed/kPa7bsKwL-c?enablejsapi=1&autoplay=0&loop=1&playlist=kPa7bsKwL-c&controls=0&rel=0&modestbranding=1&playsinline=1&fs=0&disablekb=1"
+    src="https://www.youtube.com/embed/kPa7bsKwL-c?enablejsapi=1&autoplay=1&mute=1&loop=1&playlist=kPa7bsKwL-c&controls=0&rel=0&modestbranding=1&playsinline=1&fs=0&disablekb=1"
     style="position:fixed;width:280px;height:160px;top:-9999px;left:-9999px;opacity:0;pointer-events:none;border:none;"
     allow="autoplay; encrypted-media"
     tabindex="-1">
@@ -1121,16 +1207,15 @@
     })();
 
     /* ================================================================
-       7. MUSIC TOGGLE — "Die With A Smile" - Lady Gaga & Bruno Mars
-       Uses direct iframe + postMessage instead of YouTube IFrame API
-       so it works reliably from file:// protocol.
+       7. MUSIC — "Die With A Smile" - Lady Gaga & Bruno Mars
+       Auto-plays after entry screen tap. Uses postMessage API.
     ================================================================ */
     (() => {
       const btn = document.getElementById('musicToggle');
       const iframe = document.getElementById('ytPlayer');
+      const overlay = document.getElementById('entryOverlay');
       let isPlaying = false;
       let playerReady = false;
-      let pendingPlay = false;
       let fadeInterval = null;
       let currentVolume = 0;
 
@@ -1148,42 +1233,24 @@
       window.addEventListener('message', (event) => {
         try {
           const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-          // YouTube sends 'onReady' or 'initialDelivery' when player is ready
           if (data && (data.event === 'onReady' || data.event === 'initialDelivery' || data.info)) {
             if (!playerReady) {
               playerReady = true;
-              ytCommand('setVolume', [0]);
-              if (pendingPlay) {
-                pendingPlay = false;
-                startMusic();
-              }
             }
           }
-        } catch(e) { /* ignore non-JSON messages */ }
+        } catch(e) {}
       });
 
-      // When iframe loads, send 'listening' to handshake with YouTube
+      // When iframe loads, handshake with YouTube
       iframe.addEventListener('load', () => {
-        // Initiate the postMessage handshake
         iframe.contentWindow.postMessage(JSON.stringify({
           event: 'listening',
           id: 'ytPlayer'
         }), '*');
-
-        // Fallback: if no message received, mark ready after 3s
-        setTimeout(() => {
-          if (!playerReady) {
-            playerReady = true;
-            ytCommand('setVolume', [0]);
-            if (pendingPlay) {
-              pendingPlay = false;
-              startMusic();
-            }
-          }
-        }, 3000);
+        setTimeout(() => { playerReady = true; }, 3000);
       });
 
-      // Smooth volume fade using postMessage
+      // Smooth volume fade
       function fadeVolume(from, to, duration, callback) {
         if (fadeInterval) clearInterval(fadeInterval);
         const steps = 25;
@@ -1208,33 +1275,47 @@
       }
 
       function startMusic() {
-        currentVolume = 0;
+        // Unmute first (video started muted with autoplay)
+        ytCommand('unMute');
         ytCommand('setVolume', [0]);
         ytCommand('playVideo');
-        // Fade in to 70% over 1.5 seconds
-        fadeVolume(0, 70, 1500);
+        // Fade in to 70%
+        fadeVolume(0, 70, 2000);
+        isPlaying = true;
+        btn.classList.add('playing');
       }
 
       function stopMusic() {
-        // Fade out over 1 second, then pause
         fadeVolume(currentVolume, 0, 1000, () => {
           ytCommand('pauseVideo');
         });
+        isPlaying = false;
+        btn.classList.remove('playing');
       }
 
+      function resumeMusic() {
+        ytCommand('playVideo');
+        fadeVolume(0, 70, 1500);
+        isPlaying = true;
+        btn.classList.add('playing');
+      }
+
+      // ---- ENTRY OVERLAY: tap to start everything ----
+      overlay.addEventListener('click', () => {
+        // Hide overlay
+        overlay.classList.add('hidden');
+        // Start music after a short delay for smooth transition
+        setTimeout(() => {
+          startMusic();
+        }, 400);
+      });
+
+      // Music toggle button (pause/resume)
       btn.addEventListener('click', () => {
         if (isPlaying) {
           stopMusic();
-          isPlaying = false;
-          btn.classList.remove('playing');
         } else {
-          if (!playerReady) {
-            pendingPlay = true;
-          } else {
-            startMusic();
-          }
-          isPlaying = true;
-          btn.classList.add('playing');
+          resumeMusic();
         }
       });
     })();
